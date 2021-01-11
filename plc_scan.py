@@ -4,12 +4,14 @@ import json
 
 import numpy as np
 
-
+# pip install cpppo
 from cip import CIP, CIP_Path
 import plc
 from config import *
+from cpppo.server.enip import client
+from cpppo.server.enip.get_attribute import attribute_operations
 
-logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
+logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.ERROR)
 
 
 def save_result(success_class_info_list):
@@ -24,9 +26,9 @@ def scan_one(class_name, instance_id, attribute_id = None):
     class_id = CLASS_CODES[class_name]
 
     for service_id in CLASS_SERVICE_MAP[class_name]:
-        client = plc.PLCClient(PLC_HOST)
+        plc_client = plc.PLCClient(PLC_HOST)
 
-        if not client.connected:
+        if not plc_client.connected:
             logging.error(("Cannot connect to server"))
             sys.exit(1)
       
@@ -38,10 +40,10 @@ def scan_one(class_name, instance_id, attribute_id = None):
                     )
 
         # Send a CIP request
-        client.send_rr_cip(cippkt)
+        plc_client.send_rr_cip(cippkt)
 
         # Receive the response
-        resppkt = client.recv_enippkt()
+        resppkt = plc_client.recv_enippkt()
 
         #resppkt.show()
 
@@ -60,25 +62,35 @@ def scan_one(class_name, instance_id, attribute_id = None):
     return success_service
 
 
-def scan_message_router():
-    class_id    = 2
-    instance_id = 1
-    total_size  = 3
+def scan_message_router(tag_name, position, values, types):
+    success_service = set()
 
-    client = plc.PLCClient(PLC_HOST)
+    # Read Tag 0x4c
+    read_tag = [tag_name + '[' + str(position) + ']']
 
-    if not client.connected:
-        logging.error(("Cannot connect to server"))
-        sys.exit(1)
-
-    cippkt = CIP(service=0x4c, path=CIP_Path.make_str("TEXT"))
+    with client.connector(host=PLC_HOST) as conn:        
+        for index, descr, op, reply, status, value in conn.pipeline(
+            operations=client.parse_operations(read_tag), depth=2):
+            pass
+            
+        if status == 0x00:
+            success_service.add(0x4c)
     
-    client.send_rr_cip(cippkt)
+    # Write Tag 0x4d
+    write_tag = [str(tag_name + '[' + str(position) + ']=' + "(" + types + ")" + str(values))]   
     
-    resppkt = client.recv_enippkt()
+    with client.connector(host=PLC_HOST) as conn:
+        for index, descr, op, reply, status, value in conn.pipeline(
+            operations=client.parse_operations(write_tag), depth=2):
+            pass
 
-    resppkt.show()
+        if status == 0x00:
+            success_service.add(0x4d)
     
+    print(("Class Message Router 0x02 supports specifics serives " + str(success_service)))
+
+    return success_service
+
 
 def scan_all():
     success_class_info_list = []
@@ -113,7 +125,7 @@ def scan_all():
 
     for class_name in CLASS_CODES.keys():
         if len(success_class_service_list[class_name]) > 0:
-            logging.info(("Class " + str(class_name) + " " + str(CLASS_CODES[class_name]) + " supports serives " + str(success_class_service_list[class_name])))   
+            print(("Class " + str(class_name) + " " + str(CLASS_CODES[class_name]) + " supports serives " + str(success_class_service_list[class_name])))   
 
 
     return success_class_info_list
@@ -131,7 +143,7 @@ def main():
     save_result(success_class_info_list)
     """
 
-    scan_message_router()
+    scan_message_router(tag_name="TEXT", position=0, values="Hello", types="SSTRING")
 
     
 if __name__ == "__main__":
